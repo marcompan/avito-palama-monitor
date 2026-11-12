@@ -1,0 +1,53 @@
+
+name: Проверка книг на Авито
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: palama-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Установить зависимости
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Проверить объявления
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DB_PATH: data/monitor.sqlite3
+          RUN_ONCE: '1'
+        run: python monitor.py
+
+      - name: Сохранить историю объявлений
+        if: always()
+        run: |
+          if [ -f data/monitor.sqlite3 ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add data/monitor.sqlite3
+            if ! git diff --cached --quiet; then
+              git commit -m 'Update monitored listings [skip ci]'
+              git push
+            fi
+          fi

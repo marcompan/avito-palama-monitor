@@ -126,3 +126,64 @@ async def run_cycle(browser, con):
         if item['price']:
             message += f'Цена: {item["price"]}\n'
         message += f'\n{item["url"]}'
+        
+        try:
+            await telegram(message)
+            con.execute(
+                'UPDATE seen SET notified=1 WHERE id=?',
+                (item['id'],)
+            )
+            con.commit()
+        except Exception:
+            LOG.exception(
+                'Не удалось отправить объявление %s',
+                item['id']
+            )
+            break
+
+    LOG.info(
+        'Цикл завершён: %d найдено, %d новых',
+        len(items),
+        len(pending)
+    )
+
+
+async def main():
+    logging.basicConfig(
+        level=os.getenv('LOG_LEVEL', 'INFO'),
+        format='%(asctime)s %(levelname)s %(message)s'
+    )
+
+    con = init_db()
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=['--no-sandbox']
+        )
+
+        try:
+            while True:
+                start = time.monotonic()
+
+                try:
+                    await run_cycle(browser, con)
+                except Exception:
+                    LOG.exception('Ошибка проверки Авито')
+                    if os.getenv('RUN_ONCE') == '1':
+                        raise
+
+                if os.getenv('RUN_ONCE') == '1':
+                    break
+
+                await asyncio.sleep(
+                    max(1, INTERVAL - (time.monotonic() - start))
+                )
+        finally:
+            await browser.close()
+            con.close()
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
+
